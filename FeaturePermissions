@@ -1,0 +1,104 @@
+    ## 01 - Feature Permission EVENT SUBSCRIBER
+
+    [EventSubscriber(ObjectType::Codeunit, Codeunit::"TWM Feature Permissions Mgt", 'OnAfterRebuildFeaturePermissions', '', false, false)]
+    local procedure OnAfterRebuildFeaturePermissions()
+    var
+        UpdateEmailSent: Label 'Permission to update the Email sent field in Vendor Ledger Entry.';
+        SuperLbl: Label 'SUPER';
+    begin
+        CreateFeaturePermission(Enum::"TWM Feature Permission Type"::OCEmailSent, UpdateEmailSent, SuperLbl, false, 0, 0, true);
+    end;
+
+    ## 02 - ENUM Extension
+    enumextension 50001 "OC Feature Permission Type" extends "TWM Feature Permission Type"
+    {
+    value(50000; OCEmailSent)
+    {
+        Caption = 'Update Email Sent on Vendor Ledger Entry';
+    }
+    }
+
+    ## 03 - PROCEDURE 
+    local procedure CreateFeaturePermission(FeaturePermissionType: Enum "TWM Feature Permission Type"; FeaturePermissionDescription: Text[250]; PermissionSetFilter: Code[250]; SetAsLocked: Boolean; SetupTableID: Integer; SetupTableFieldID: Integer; IncludeSUPER: Boolean)
+    var
+        FeaturePermission: Record "TWM Feature Permission";
+    begin
+        if PermissionSetFilter = '' then begin
+            PermissionSetFilter := '''D365 BASIC''|BASIC|SUPER';
+            IncludeSUPER := false;
+        end;
+        if not FeaturePermission.Get(FeaturePermissionType) then begin
+            FeaturePermission.Init();
+            FeaturePermission."Feature Permission Type" := FeaturePermissionType;
+            FeaturePermission.Description := FeaturePermissionDescription;
+            FeaturePermission."Role ID Filter" := PermissionSetFilter;
+            FeaturePermission."Setup Table ID" := SetupTableID;
+            FeaturePermission."Setup Table Field ID" := SetupTableFieldID;
+            FeaturePermission.System := SetAsLocked;
+            if IncludeSUPER then
+                FeaturePermission."Role ID Filter" := DelChr(FeaturePermission."Role ID Filter" + '|SUPER', '<>', '|');
+            FeaturePermission.Insert();
+        end;
+    end;
+
+    ##04 - CODE on the Page Vendor Ledge Entry
+pageextension 50003 "OC Vend Ledger Entry Ext" extends "Vendor Ledger Entries"
+{
+    layout
+    {
+        addlast(Control1)
+        {
+            field("Email Sent"; "Email Sent")
+            {
+                ApplicationArea = All;
+                ToolTip = 'Specifies the value of the Email Sent field.';
+            }
+        }
+    }
+    actions
+    {
+        addlast(navigation)
+        {
+            action(updateSendEmail)
+            {
+                ApplicationArea = All;
+                Visible = true;
+                Caption = 'Update Send Email';
+                Image = UpdateDescription;
+                ToolTip = 'Update Send Email field';
+
+                trigger OnAction()
+                var
+                    VendLedgEntry: Record "Vendor Ledger Entry";
+                    FeaturePermissionsMgt: Codeunit "TWM Feature Permissions Mgt";
+                    ConfigurationErrorMessage: Label 'You do not have the permission to perform this action.';
+                begin
+                    if FeaturePermissionsMgt.CheckFeaturePermission(Enum::"TWM Feature Permission Type"::OCEmailSent) then begin
+                        VendLedgEntry.Reset();
+                        VendLedgEntry.SetRange("Document Type", Rec."Document Type");
+                        VendLedgEntry.SetRange("Document No.", rec."Document No.");
+                        VendLedgEntry.SetRange("Vendor No.", Rec."Vendor No.");
+                        if VendLedgEntry.FindFirst() then begin
+                            if VendLedgEntry."Email Sent" then
+                                VendLedgEntry."Email Sent" := false
+                            else
+                                VendLedgEntry."Email Sent" := true;
+                            VendLedgEntry.Modify();
+                        end;
+                    end else
+                        Error(ConfigurationErrorMessage);
+                end;
+            }
+            action(SendEmail)
+            {
+                ApplicationArea = All;
+                Visible = false;
+                Caption = 'Send Email';
+                Image = SendEmailPDF;
+                RunObject = codeunit "Email Vendor Payment";
+                ToolTip = 'Send Vendor Payment email';
+            }
+        }
+    }
+}
+    
