@@ -1,0 +1,76 @@
+codeunit 50005 "Email Vendor Payment"
+{
+    Permissions = tabledata "Vendor Ledger Entry" = RIM;
+    TableNo = "Job Queue Entry";
+
+    trigger OnRun()
+    var
+        EmailAddr: Text;
+    begin
+        VendLedEntry.Reset();
+        VendLedEntry.SetFilter("Document Type", '%1|%2', VendLedEntry."Document Type"::Payment, VendLedEntry."Document Type"::Refund);
+        VendLedEntry.SetRange("Email Sent", false);
+        if VendLedEntry.FindSet() then
+            repeat
+                if Vendor.Get(VendLedEntry."Vendor No.") then;
+                VendLedEntryFilter.Reset();
+                VendLedEntryFilter.SetRange("Document No.", VendLedEntry."Document No.");
+                VendLedEntryFilter.SetRange("Vendor No.", VendLedEntry."Vendor No.");
+                if VendLedEntryFilter.FindSet() then;
+
+                clear(RecRef);
+                recRef.GetTable(VendLedEntryFilter);
+                Clear(EmailAddr);
+
+                CustomReportSelection.Reset();
+                CustomReportSelection.SetRange("Source Type", Database::Vendor);
+                CustomReportSelection.setrange("Source No.", Vendor."No.");
+                CustomReportSelection.setrange("Report ID", Report::"Vendor - Payment Receipt");
+                if CustomReportSelection.FindSet() then begin
+                    repeat
+                        if CustomReportSelection."Send To Email" <> '' then
+                            EmailAddr += CustomReportSelection."Send To Email" + ';';
+                    until CustomReportSelection.Next() = 0;
+                    if EmailAddr <> '' then begin
+                        if ReportSendMailWithExternalAttachment(Report::"Vendor - Payment Receipt", RecRef, RecRef.number, VendLedEntry."Document No.", EmailAddr) then begin
+                            VendLedEntry."Email Sent" := true;
+                            VendLedEntry.Modify();
+                        end;
+                    end;
+                end;
+            until VendLedEntry.Next() = 0;
+    end;
+
+    procedure ReportSendMailWithExternalAttachment(ReportToSend: Integer; Recordr: RecordRef; TableID: Integer; DocNo: Text; ToAddr: Text): Boolean
+    var
+        TempBlob: Codeunit "Temp Blob";
+        outStreamReport: OutStream;
+        inStreamReport: InStream;
+        EmailScenario: Enum "Email Scenario";
+        OcorianEventSub: Codeunit "Ocorian Event subscribers";
+    begin
+        Clear(TempBlob);
+        Clear(outStreamReport);
+        Clear(inStreamReport);
+        //Generate blob from report
+        TempBlob.CreateOutStream(outStreamReport);
+        Report.SaveAs(ReportToSend, '', ReportFormat::Pdf, outStreamReport, Recordr);
+        TempBlob.CreateInStream(inStreamReport);
+
+        OcorianEventSub.SetCompanyName(VendLedEntry."Global Dimension 1 Code");
+        if VendLedEntry."Global Dimension 1 Code" in ['HKG079', 'HKG080', 'HKG238'] then
+            exit(DocumentMailing.EmailFile(inStreamReport, 'VendorPaymentReceipt.pdf', '',
+            'Ocorian Payment Receipt - ' + DocNo, ToAddr, true, EmailScenario::"Vendor Remittance 2"))
+        else
+            exit(DocumentMailing.EmailFile(inStreamReport, 'VendorPaymentReceipt.pdf', '',
+            'Ocorian Payment Receipt - ' + DocNo, ToAddr, true, EmailScenario::"Vendor Remittance"));
+    end;
+
+    var
+        Vendor: Record Vendor;
+        VendLedEntry: Record "Vendor Ledger Entry";
+        VendLedEntryFilter: Record "Vendor Ledger Entry";
+        CustomReportSelection: Record "Custom Report Selection";
+        DocumentMailing: Codeunit "Document-Mailing";
+        recRef: RecordRef;
+}
